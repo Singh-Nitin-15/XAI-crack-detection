@@ -1,5 +1,5 @@
 """
-Train ResNet18 for concrete crack classification.
+Train ResNet50 for concrete crack classification.
 Uses a synthetic dataset generated procedurally since Kaggle access is unavailable.
 The synthetic dataset creates crack-like patterns for positive class and plain textures for negative.
 """
@@ -103,7 +103,7 @@ class CrackDataset(Dataset):
 
 
 def get_model():
-    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+    model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     model.fc = nn.Linear(model.fc.in_features, 2)
     return model
 

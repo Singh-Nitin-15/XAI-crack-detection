@@ -1,6 +1,6 @@
 """
 Grad-CAM explanation module.
-Loads trained ResNet18 and produces prediction + heatmap overlay.
+Loads trained ResNet50 and produces prediction + heatmap overlay.
 """
 import os
 import cv2
@@ -36,7 +36,7 @@ def _load_model():
     global _model, _target_layer
     if _model is not None:
         return _model
-    model = models.resnet18(weights=None)
+    model = models.resnet50(weights=None)
     model.fc = torch.nn.Linear(model.fc.in_features, 2)
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE, weights_only=True))
     model.to(DEVICE)
