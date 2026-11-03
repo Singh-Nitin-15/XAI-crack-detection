@@ -14,3 +14,4 @@ frontend/dist/
 k8s/
 scripts/
 test_*.jpg
+ai/*.pth.bak

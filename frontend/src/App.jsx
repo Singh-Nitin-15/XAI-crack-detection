@@ -11,13 +11,19 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [error, setError] = useState(null)
+  const [apiOffline, setApiOffline] = useState(false)
 
   const fetchHistory = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/history`)
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
       const data = await res.json()
       setHistory(data)
+      setApiOffline(false)
     } catch (e) {
+      if (e.name === 'TypeError' || e.message.includes('fetch')) {
+        setApiOffline(true)
+      }
       console.error('Failed to fetch history:', e)
     }
   }, [])
@@ -50,9 +56,15 @@ function App() {
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
       const data = await res.json()
       setResult(data)
+      setApiOffline(false)
       fetchHistory()
     } catch (e) {
-      setError(e.message)
+      if (e.name === 'TypeError' || e.message.includes('fetch')) {
+        setError('Cannot connect to API. Make sure the backend is running.')
+        setApiOffline(true)
+      } else {
+        setError(e.message)
+      }
     } finally {
       setLoading(false)
     }
@@ -89,6 +101,12 @@ function App() {
       </header>
 
       <main className="main">
+        {apiOffline && (
+          <div className="api-offline-banner">
+            ⚠️ Cannot connect to API at <strong>{API_URL}</strong>. Make sure the backend is running.
+          </div>
+        )}
+
         <section className="upload-section">
           <div
             className={`drop-zone ${dragActive ? 'active' : ''} ${preview ? 'has-file' : ''}`}
@@ -235,7 +253,7 @@ function App() {
       </main>
 
       <footer className="footer">
-        <p>XAI Crack Detection Service • ResNet18 + Grad-CAM • Built with PyTorch & FastAPI</p>
+        <p>XAI Crack Detection Service • ResNet50 + Grad-CAM • Built with PyTorch & FastAPI</p>
       </footer>
     </div>
   )

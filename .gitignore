@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.db
+storage/
+node_modules/
+dist/
+ai/dataset/
+ai/model.pth
+test_*.jpg
+*_heatmap.jpg
+.vite/
+.DS_Store
+Thumbs.db
+ai/*.pth.bak

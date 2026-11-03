@@ -1,20 +1,18 @@
-"""
-Grad-CAM explanation module.
-Loads trained ResNet50 and produces prediction + heatmap overlay.
-"""
+"""Grad-CAM explanation module for ResNet50 crack detection."""
 import os
 import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision import models, transforms
-from PIL import Image
+from PIL import Image, ImageOps
 from pathlib import Path
 
 MODEL_PATH = Path(__file__).parent / "model.pth"
 IMG_SIZE = 224
 CLASSES = ["negative", "positive"]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+CRACK_THRESHOLD = float(os.getenv("CRACK_THRESHOLD", "0.5"))
 
 _model = None
 _target_layer = None
@@ -38,7 +36,8 @@ def _load_model():
         return _model
     model = models.resnet50(weights=None)
     model.fc = torch.nn.Linear(model.fc.in_features, 2)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE, weights_only=True))
+    state = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=True)
+    model.load_state_dict(state)
     model.to(DEVICE)
     model.eval()
     _target_layer = model.layer4[-1]
@@ -48,14 +47,23 @@ def _load_model():
     return model
 
 
-def _preprocess(image_path):
-    transform = transforms.Compose([
-        transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ])
-    img = Image.open(image_path).convert("RGB")
-    return transform(img).unsqueeze(0).to(DEVICE)
+_TRANSFORM = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+])
+
+
+def _load_image(image_path):
+    """Load as RGB with EXIF orientation applied, so phone photos are upright.
+    The same image is used for model input and heatmap overlay, so the two
+    always line up."""
+    with Image.open(image_path) as img:
+        return ImageOps.exif_transpose(img).convert("RGB")
+
+
+def _preprocess(img):
+    return _TRANSFORM(img).unsqueeze(0).to(DEVICE)
 
 
 def _generate_gradcam(input_tensor, class_idx):
@@ -65,7 +73,6 @@ def _generate_gradcam(input_tensor, class_idx):
     output = model(input_tensor)
     target = output[0, class_idx]
     target.backward()
-
     weights = _gradients.mean(dim=[2, 3], keepdim=True)
     cam = (weights * _activations).sum(dim=1, keepdim=True)
     cam = F.relu(cam)
@@ -78,25 +85,28 @@ def _generate_gradcam(input_tensor, class_idx):
 
 
 def predict_with_heatmap(image_path, output_heatmap_path=None):
-    """
-    Returns: (label, confidence, heatmap_overlay_path)
-    """
+    """Returns: (label, confidence, heatmap_overlay_path)"""
     model = _load_model()
-    input_tensor = _preprocess(image_path)
+    img = _load_image(image_path)
+    input_tensor = _preprocess(img)
 
     with torch.no_grad():
         logits = model(input_tensor)
     probs = F.softmax(logits, dim=1)
-    confidence, pred_idx = probs.max(1)
-    confidence = confidence.item()
-    pred_idx = pred_idx.item()
-    label = CLASSES[pred_idx]
+    p_positive = probs[0, 1].item()
 
-    input_tensor_grad = _preprocess(image_path)
-    input_tensor_grad.requires_grad_(False)
-    cam = _generate_gradcam(input_tensor_grad, pred_idx)
+    if p_positive >= CRACK_THRESHOLD:
+        label = "positive"
+        confidence = p_positive
+    else:
+        label = "negative"
+        confidence = 1.0 - p_positive
 
-    orig = cv2.imread(str(image_path))
+    pred_idx = CLASSES.index(label)
+
+    cam = _generate_gradcam(input_tensor, pred_idx)
+
+    orig = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
     orig = cv2.resize(orig, (IMG_SIZE, IMG_SIZE))
     heatmap = cv2.applyColorMap((cam * 255).astype(np.uint8), cv2.COLORMAP_JET)
     overlay = cv2.addWeighted(orig, 0.5, heatmap, 0.5, 0)
@@ -112,7 +122,7 @@ def predict_with_heatmap(image_path, output_heatmap_path=None):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python explain.py <image_path>")
+        print("Usage: python -m ai.explain <image_path>")
         sys.exit(1)
     img_path = sys.argv[1]
     lbl, conf, hm = predict_with_heatmap(img_path)

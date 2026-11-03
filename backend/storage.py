@@ -28,8 +28,17 @@ class LocalStorage(StorageBackend):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
+    def _safe_path(self, key: str) -> Path:
+        """Resolve key inside base_dir; reject anything that escapes it
+        (e.g. "../../etc/passwd" or an absolute path like "/etc/passwd")."""
+        base = self.base_dir.resolve()
+        p = (base / key).resolve()
+        if p == base or not p.is_relative_to(base):
+            raise ValueError(f"Invalid storage key: {key!r}")
+        return p
+
     def save(self, source_path: str, dest_key: str) -> str:
-        dest = self.base_dir / dest_key
+        dest = self._safe_path(dest_key)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, dest)
         return str(dest)
@@ -38,14 +47,14 @@ class LocalStorage(StorageBackend):
         return f"/files/{key}"
 
     def delete(self, key: str) -> bool:
-        p = self.base_dir / key
+        p = self._safe_path(key)
         if p.exists():
             p.unlink()
             return True
         return False
 
     def get_full_path(self, key: str) -> Path:
-        return self.base_dir / key
+        return self._safe_path(key)
 
 
 class MinIOStorage(StorageBackend):

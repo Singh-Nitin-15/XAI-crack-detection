@@ -149,16 +149,15 @@ def main():
     print(f"Target: {TARGET_PER_CLASS} per class, {TRAIN_RATIO:.0%}/{1-TRAIN_RATIO:.0%} train/val")
     print("=" * 60)
 
-    # Clean old dataset
-    if DATA_DIR.exists():
-        print(f"\nRemoving old dataset...")
+    # Clean old dataset (only with --force, so an existing dataset is never
+    # wiped by accident). The trained model (ai/model.pth) is never touched.
+    if DATA_DIR.exists() and any(DATA_DIR.iterdir()):
+        if "--force" not in sys.argv:
+            print(f"\nERROR: {DATA_DIR} already exists and is not empty.")
+            print("  Re-run with --force to delete it and download a fresh copy.")
+            sys.exit(1)
+        print(f"\nRemoving old dataset (--force)...")
         shutil.rmtree(DATA_DIR, onerror=force_remove)
-
-    # Remove old model
-    model_path = AI_DIR / "model.pth"
-    if model_path.exists():
-        print("Removing old model.pth...")
-        model_path.unlink()
 
     # List files
     print("\n[1/3] Listing dataset files (may take a few pages)...")

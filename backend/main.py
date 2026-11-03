@@ -44,6 +44,17 @@ if isinstance(storage, LocalStorage):
 init_db()
 
 
+def _iso_utc(dt):
+    """Timestamps are stored as UTC, but the DB column is timezone-naive, so
+    values come back without an offset and browsers would read them as local
+    time. Attach UTC explicitly so the ISO string ends in +00:00."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 @app.get("/health")
 def health():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
@@ -107,7 +118,7 @@ async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
         "confidence": record.confidence,
         "image_url": storage.get_url(image_key),
         "heatmap_url": storage.get_url(heatmap_key),
-        "created_at": record.created_at.isoformat(),
+        "created_at": _iso_utc(record.created_at),
     }
 
 
@@ -122,7 +133,7 @@ def history(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
             "confidence": r.confidence,
             "image_url": storage.get_url(r.image_path),
             "heatmap_url": storage.get_url(r.heatmap_path),
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "created_at": _iso_utc(r.created_at),
         }
         for r in records
     ]
@@ -133,8 +144,11 @@ def serve_file(file_path: str):
     content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
 
     if isinstance(storage, LocalStorage):
-        full_path = storage.get_full_path(file_path)
-        if not full_path.exists():
+        try:
+            full_path = storage.get_full_path(file_path)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="File not found")
+        if not full_path.is_file():
             raise HTTPException(status_code=404, detail="File not found")
         return FileResponse(str(full_path), media_type=content_type)
 
