@@ -1,5 +1,6 @@
 """Grad-CAM explanation module for ResNet50 crack detection."""
 import os
+import threading
 import cv2
 import numpy as np
 import torch
@@ -14,6 +15,7 @@ CLASSES = ["negative", "positive"]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CRACK_THRESHOLD = float(os.getenv("CRACK_THRESHOLD", "0.5"))
 
+_lock = threading.Lock()
 _model = None
 _target_layer = None
 _activations = None
@@ -85,7 +87,15 @@ def _generate_gradcam(input_tensor, class_idx):
 
 
 def predict_with_heatmap(image_path, output_heatmap_path=None):
-    """Returns: (label, confidence, heatmap_overlay_path)"""
+    """Returns: (label, confidence, heatmap_overlay_path)
+
+    Thread-safe: Grad-CAM uses module-level hook state, so calls are
+    serialized with a lock (the API runs this in a worker thread)."""
+    with _lock:
+        return _predict_with_heatmap(image_path, output_heatmap_path)
+
+
+def _predict_with_heatmap(image_path, output_heatmap_path=None):
     model = _load_model()
     img = _load_image(image_path)
     input_tensor = _preprocess(img)

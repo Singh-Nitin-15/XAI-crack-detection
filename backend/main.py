@@ -12,6 +12,8 @@ from io import BytesIO
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
+from PIL import UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -31,6 +33,10 @@ app.add_middleware(
 )
 
 storage = get_storage()
+
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "20"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 TEMP_DIR = os.getenv("TEMP_DIR", tempfile.gettempdir())
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -70,7 +76,15 @@ async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    ext = Path(file.filename or "image.jpg").suffix or ".jpg"
+    # Only keep known image extensions: the stored file is later served with a
+    # content type guessed from its extension (e.g. ".html" would be served as
+    # a web page).
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
     uid = str(uuid.uuid4())
     upload_name = f"{uid}{ext}"
     heatmap_name = f"{uid}_heatmap.jpg"
@@ -80,12 +94,21 @@ async def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
     tmp_upload = os.path.join(TEMP_DIR, upload_name)
     tmp_heatmap = os.path.join(TEMP_DIR, heatmap_name)
 
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large (max {MAX_UPLOAD_MB} MB)")
     with open(tmp_upload, "wb") as f:
         f.write(content)
 
     try:
-        label, confidence, _ = predict_with_heatmap(tmp_upload, tmp_heatmap)
+        # Model inference is CPU-heavy; run it in a worker thread so the event
+        # loop keeps serving /health and /history meanwhile.
+        label, confidence, _ = await run_in_threadpool(predict_with_heatmap, tmp_upload, tmp_heatmap)
+    except UnidentifiedImageError:
+        for p in [tmp_upload, tmp_heatmap]:
+            if os.path.exists(p):
+                os.unlink(p)
+        raise HTTPException(status_code=400, detail="File is not a valid image")
     except Exception as e:
         for p in [tmp_upload, tmp_heatmap]:
             if os.path.exists(p):

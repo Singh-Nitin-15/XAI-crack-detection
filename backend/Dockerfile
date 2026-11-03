@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ai/ ai/
 COPY backend/ backend/
 
-ENV STORAGE_TYPE=minio
+ENV STORAGE_TYPE=local
 ENV STORAGE_DIR=/app/storage
 ENV TEMP_DIR=/tmp/xai
 ENV PORT=8000
